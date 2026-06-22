@@ -1,0 +1,53 @@
+broker: kb
+version: "manual"
+source: "KB증권 공식 구현서 또는 사용자가 제공한 내부 문서"
+base_urls:
+  paper: ""
+  real: ""
+auth:
+  token:
+    method: ""
+    path: ""
+    required_headers: []
+    required_body: []
+features:
+  quote:
+    method: ""
+    path: ""
+    required_headers: []
+    required_params: []
+  orderbook:
+    method: ""
+    path: ""
+    required_headers: []
+    required_params: []
+  daily_bars:
+    method: ""
+    path: ""
+    required_headers: []
+    required_params: []
+  balance:
+    method: ""
+    path: ""
+    required_headers: []
+    required_params: []
+  holdings:
+    method: ""
+    path: ""
+    required_headers: []
+    required_params: []
+  buyable_amount:
+    method: ""
+    path: ""
+    required_headers: []
+    required_params: []
+  place_order:
+    method: ""
+    path: ""
+    required_headers: []
+    required_body: []
+  cancel_order:
+    method: ""
+    path: ""
+    required_headers: []
+    required_body: []
