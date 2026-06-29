@@ -1,7 +1,7 @@
 [project]
-name = "kb-openapi-b2b-sample"
+name = "kb-openapi-b2c-production"
 version = "1.0.0"
-description = "KB OpenAPI B2B sample environment"
+description = "KB OpenAPI B2C production environment"
 readme = "README.md"
 requires-python = ">=3.11"
 
@@ -9,12 +9,8 @@ dependencies = [
     "fastapi>=0.104.0",
     "uvicorn>=0.24.0",
     "pydantic>=2.0.0",
-    "pyyaml>=6.0.0",
     "httpx>=0.25.0",
-    "python-dotenv>=1.0.0",
-    "requests>=2.32.5",
     "pycryptodome>=3.20.0",
-    "openpyxl>=3.1.5",
 ]
 
 [build-system]
