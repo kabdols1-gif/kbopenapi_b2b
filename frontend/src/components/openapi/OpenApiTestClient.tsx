@@ -4,33 +4,17 @@ import { type CSSProperties, type ReactNode, useCallback, useEffect, useMemo, us
 
 export type OpenApiMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
-export type OpenApiFieldSpec = {
-  korean?: string;
-  name?: string;
-  type?: string;
-  length?: string;
-  decimal?: string;
-  note?: string;
-  default?: string;
-  skipValue?: string;
-  description?: string;
-  required?: string | boolean;
-};
-
 export type OpenApiSample = {
   id: string;
   label: string;
   method: OpenApiMethod;
   path: string;
   description: string;
-  businessCategory?: OpenApiBusinessGroup;
   headers?: Record<string, string>;
   query?: Record<string, unknown>;
   body?: unknown;
   baseUrl?: string;
   source?: "postman" | "trx-rule";
-  inputSpec?: OpenApiFieldSpec[];
-  outputSpec?: OpenApiFieldSpec[];
 };
 
 export type OpenApiTokenProcedure = {
@@ -88,6 +72,25 @@ type RunHistory = {
 
 type RequestRunOutcome = RunResult & {
   historyItem?: RunHistory;
+};
+
+type BatchResultFilter = "all" | "success" | "failure";
+
+type BatchRunSummary = {
+  id: string;
+  executedAt: string;
+  results: RunHistory[];
+  total: number;
+  success: number;
+  failure: number;
+  stopped?: boolean;
+};
+
+type BatchRunProgress = {
+  total: number;
+  completed: number;
+  currentIndex: number;
+  currentLabel: string;
 };
 
 type ManagedRealtimeState = {
@@ -149,12 +152,6 @@ type OpenApiTokenRequestDefault = {
   body?: unknown;
 };
 type TokenSetupStepKey = "b2cToken" | "terms" | "financial" | "authCode" | "token";
-
-type TokenIssueStatus = {
-  state: "idle" | "running" | "issued" | "issuedWithoutToken" | "failed";
-  status?: number;
-  updatedAt?: string;
-};
 
 type OpenApiProxyResponse = {
   status: number;
@@ -241,7 +238,7 @@ const IS_OPENAPI_PRODUCTION_MODE = ["production", "prod"].includes(
   (process.env.NEXT_PUBLIC_OPENAPI_MODE || "development").toLowerCase()
 );
 const KB_B2C_TOKEN_BASE_URL = IS_OPENAPI_PRODUCTION_MODE
-  ? process.env.NEXT_PUBLIC_OPENAPI_PROD_KB_B2C_TOKEN_BASE_URL || "https://developer.kbsec.com:32484"
+  ? process.env.NEXT_PUBLIC_OPENAPI_PROD_KB_B2C_TOKEN_BASE_URL || "https://developer.kbsec.com"
   : process.env.NEXT_PUBLIC_OPENAPI_DEV_KB_B2C_TOKEN_BASE_URL || "https://ddeveloper.kbsec.com:32484";
 const KB_B2B_BASE_URL = IS_OPENAPI_PRODUCTION_MODE
   ? process.env.NEXT_PUBLIC_OPENAPI_PROD_KB_B2B_BASE_URL || "https://baasapi.kbsec.com:32484"
@@ -296,170 +293,6 @@ function prettyJson(value: string) {
   } catch {
     return value;
   }
-}
-
-function specText(value: string | undefined) {
-  const trimmed = (value ?? "").trim();
-  return trimmed || "-";
-}
-
-function fieldLengthText(field: OpenApiFieldSpec) {
-  const length = (field.length ?? "").trim();
-  const decimal = (field.decimal ?? "").trim();
-  if (!length && !decimal) return "-";
-  if (decimal && decimal !== "0") return `${length || "0"}.${decimal}`;
-  return length || "-";
-}
-
-function fieldSpecKey(field: OpenApiFieldSpec, index: number) {
-  return `${field.name || field.korean || "field"}::${index}`;
-}
-
-function fieldRequiredText(field: OpenApiFieldSpec) {
-  const value = field.required;
-  if (typeof value === "boolean") return value ? "Y" : "N";
-  const text = (value ?? "").trim();
-  const upper = text.toUpperCase();
-  if (!text) return "N";
-  if (["1", "Y", "YES", "TRUE", "M", "MANDATORY", "REQUIRED"].includes(upper) || text.includes("필수")) {
-    return "Y";
-  }
-  return "N";
-}
-
-function RequiredJsonBodyEditor({
-  value,
-  onChange,
-  rows,
-  className = "",
-  textClassName = "text-sm",
-}: {
-  value: string;
-  onChange: (value: string) => void;
-  rows: number;
-  className?: string;
-  textClassName?: string;
-}) {
-  const highlightRef = useRef<HTMLPreElement>(null);
-  const lines = value.split("\n");
-  const textClasses = `${textClassName} font-mono leading-6`;
-
-  return (
-    <div className={`relative rounded-md border border-slate-200 bg-white focus-within:border-[#fcb514] ${className}`}>
-      <pre
-        ref={highlightRef}
-        aria-hidden="true"
-        className={`pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words px-3 py-2 ${textClasses} text-slate-700`}
-      >
-        {lines.map((line, index) => (
-          <span key={`${index}-${line}`}>
-            {line || " "}
-            {index < lines.length - 1 ? "\n" : ""}
-          </span>
-        ))}
-      </pre>
-      <textarea
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        onScroll={(event) => {
-          if (!highlightRef.current) return;
-          highlightRef.current.scrollTop = event.currentTarget.scrollTop;
-          highlightRef.current.scrollLeft = event.currentTarget.scrollLeft;
-        }}
-        rows={rows}
-        spellCheck={false}
-        className={`relative z-10 block w-full resize-y bg-transparent px-3 py-2 ${textClasses} text-transparent caret-slate-900 outline-none selection:bg-[#fcb514]/30`}
-      />
-    </div>
-  );
-}
-
-function SpecTable({ title, fields }: { title: "Input" | "Output"; fields?: OpenApiFieldSpec[] }) {
-  const items = fields ?? [];
-
-  return (
-    <section className="rounded-lg border border-slate-200 bg-white">
-      <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-3 py-2">
-        <h3 className="text-xs font-black text-slate-700">{title}</h3>
-        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-black text-slate-600">
-          {items.length}개
-        </span>
-      </div>
-      {items.length === 0 ? (
-        <p className="px-3 py-4 text-xs font-semibold text-slate-500">표시할 명세가 없습니다.</p>
-      ) : (
-        <div className="max-h-72 overflow-auto">
-          <table className="min-w-[760px] table-fixed border-collapse text-left text-xs">
-            <thead className="sticky top-0 bg-slate-50 text-[11px] font-black text-slate-500">
-              <tr>
-                <th className="w-[28%] px-3 py-2">필드</th>
-                <th className="w-[22%] px-3 py-2">속성</th>
-                <th className="w-[10%] px-3 py-2 text-center">필수</th>
-                <th className="px-3 py-2">설명</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {items.map((field, index) => (
-                <tr key={`${title}-${fieldSpecKey(field, index)}`} className="align-top">
-                  <td className="px-3 py-2">
-                    <p className="break-words font-black text-slate-700">{specText(field.korean || field.name)}</p>
-                    <p className="mt-1 break-all font-mono text-[11px] font-semibold text-slate-500">
-                      {specText(field.name)}
-                    </p>
-                  </td>
-                  <td className="px-3 py-2 text-[11px] font-semibold text-slate-600">
-                    <p>
-                      타입 <span className="font-mono text-slate-800">{specText(field.type)}</span>
-                    </p>
-                    <p className="mt-1">
-                      길이 <span className="font-mono text-slate-800">{fieldLengthText(field)}</span>
-                    </p>
-                    {field.default ? (
-                      <p className="mt-1 break-all">
-                        기본값 <span className="font-mono text-slate-800">{field.default}</span>
-                      </p>
-                    ) : null}
-                    {field.note && field.note !== "Field" ? (
-                      <p className="mt-1 break-words text-slate-500">{field.note}</p>
-                    ) : null}
-                  </td>
-                  <td className="px-3 py-2 text-center text-[11px] font-black text-slate-700">
-                    {fieldRequiredText(field)}
-                  </td>
-                  <td className="whitespace-pre-wrap break-words px-3 py-2 text-[11px] font-semibold leading-relaxed text-slate-600">
-                    {field.description?.trim() || "-"}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </section>
-  );
-}
-
-function SampleSpecPanel({ sample }: { sample: OpenApiSample | null }) {
-  return (
-    <div className="space-y-3">
-      <div className="min-w-0">
-        <p className="text-[11px] font-black uppercase tracking-normal text-slate-500">Input / Output</p>
-        <h3 className="mt-1 break-words text-sm font-black text-[#2c2a26]">
-          {sample ? sample.label : "전문을 선택하세요"}
-        </h3>
-      </div>
-      {sample ? (
-        <>
-          <SpecTable title="Input" fields={sample.inputSpec} />
-          <SpecTable title="Output" fields={sample.outputSpec} />
-        </>
-      ) : (
-        <p className="rounded-lg border border-slate-200 bg-white px-3 py-4 text-xs font-semibold text-slate-500">
-          전문을 선택하면 입력/출력 명세가 표시됩니다.
-        </p>
-      )}
-    </div>
-  );
 }
 
 function parseJson(value: string): { parsed: Record<string, unknown> | undefined; error: string | null; text: string } {
@@ -547,112 +380,24 @@ function applyRealtimeTrType(body: unknown, trType: "1" | "2") {
   return cloned;
 }
 
-const ACCESS_TOKEN_KEYS = [
-  "access_token",
-  "access-token",
-  "accessToken",
-  "accessTokenValue",
-  "access_token_value",
-  "accessTokenString",
-  "accesstoken",
-  "authorization",
-  "oauthToken",
-  "oauth_token",
-];
-const FALLBACK_TOKEN_KEYS = ["token", "tokenValue", "bearerToken", "bearer_token"];
-
-type AccessTokenExtractOptions = {
-  includeFallbackTokenKeys?: boolean;
-};
-
-function normalizeExtractedToken(value: string) {
-  const trimmed = value.trim();
-  if (!trimmed || /^bearer$/i.test(trimmed)) return "";
-  return trimmed.replace(/^bearer\s+/i, "");
-}
-
-function normalizeResponseText(value: string) {
-  return value.replace(/^\uFEFF/, "").trim();
-}
-
-function parseNestedJsonString(value: string): unknown {
-  const trimmed = normalizeResponseText(value);
-  if (!trimmed || (!trimmed.startsWith("{") && !trimmed.startsWith("["))) return undefined;
+function extractAccessToken(value: string) {
   try {
-    return JSON.parse(trimmed);
-  } catch {
-    return undefined;
-  }
-}
-
-function findUrlEncodedValue(value: string, keys: string[]) {
-  const trimmed = normalizeResponseText(value).replace(/^\?/, "");
-  if (!trimmed.includes("=")) return "";
-  try {
-    const params = new URLSearchParams(trimmed);
-    const targetKeys = new Set(keys.map((key) => key.toLowerCase()));
-    for (const [key, paramValue] of params.entries()) {
-      if (targetKeys.has(key.toLowerCase()) && paramValue.trim()) return paramValue.trim();
-    }
+    const parsed = JSON.parse(value);
+    if (!parsed || typeof parsed !== "object") return "";
+    const direct = (parsed as { access_token?: unknown; accessToken?: unknown }).access_token ?? (parsed as { accessToken?: unknown }).accessToken;
+    if (typeof direct === "string") return direct;
+    const dataBody = (parsed as { dataBody?: unknown }).dataBody;
+    if (!dataBody || typeof dataBody !== "object") return "";
+    const nested = (dataBody as { access_token?: unknown; accessToken?: unknown }).access_token ?? (dataBody as { accessToken?: unknown }).accessToken;
+    return typeof nested === "string" ? nested : "";
   } catch {
     return "";
   }
-  return "";
-}
-
-function extractBearerToken(value: string) {
-  const trimmed = normalizeResponseText(value);
-  const headerMatch = trimmed.match(/(?:^|\r?\n)\s*authorization\s*:\s*bearer\s+([^\s\r\n,]+)/i);
-  if (headerMatch?.[1]) return headerMatch[1];
-  const bearerMatch = trimmed.match(/\bbearer\s+([A-Za-z0-9._~+/=-]+)/i);
-  return bearerMatch?.[1] ?? "";
-}
-
-function extractNamedTokenFromText(value: string, keys: string[]) {
-  const trimmed = normalizeResponseText(value);
-  for (const key of keys) {
-    const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const match = trimmed.match(new RegExp(`(?:^|[\\s,{])["']?${escapedKey}["']?\\s*[:=]\\s*["']?([^"',\\s&}]+)`, "i"));
-    const token = normalizeExtractedToken(match?.[1] ?? "");
-    if (token) return token;
-  }
-  return "";
-}
-
-function extractAccessToken(value: string, options: AccessTokenExtractOptions = {}) {
-  const trimmed = normalizeResponseText(value);
-  if (!trimmed) return "";
-
-  try {
-    const parsed = JSON.parse(trimmed);
-    const accessToken = normalizeExtractedToken(findStringValue(parsed, ACCESS_TOKEN_KEYS));
-    if (accessToken) return accessToken;
-    if (options.includeFallbackTokenKeys) {
-      const fallbackToken = normalizeExtractedToken(findStringValue(parsed, FALLBACK_TOKEN_KEYS));
-      if (fallbackToken) return fallbackToken;
-    }
-  } catch {
-    // Continue with non-JSON token response formats below.
-  }
-
-  const urlEncodedAccessToken = normalizeExtractedToken(findUrlEncodedValue(trimmed, ACCESS_TOKEN_KEYS));
-  if (urlEncodedAccessToken) return urlEncodedAccessToken;
-  if (options.includeFallbackTokenKeys) {
-    const urlEncodedFallbackToken = normalizeExtractedToken(findUrlEncodedValue(trimmed, FALLBACK_TOKEN_KEYS));
-    if (urlEncodedFallbackToken) return urlEncodedFallbackToken;
-  }
-
-  const bearerToken = normalizeExtractedToken(extractBearerToken(trimmed));
-  if (bearerToken) return bearerToken;
-
-  const namedAccessToken = extractNamedTokenFromText(trimmed, ACCESS_TOKEN_KEYS);
-  if (namedAccessToken) return namedAccessToken;
-  return options.includeFallbackTokenKeys ? extractNamedTokenFromText(trimmed, FALLBACK_TOKEN_KEYS) : "";
 }
 
 function extractApprovalKey(value: string) {
   try {
-    const parsed = JSON.parse(normalizeResponseText(value));
+    const parsed = JSON.parse(value);
     return findStringValue(parsed, ["approval_key", "approvalKey"]);
   } catch {
     return "";
@@ -674,7 +419,7 @@ function extractAccessTokenExpiresAt(value: string) {
   };
 
   try {
-    const parsed = JSON.parse(normalizeResponseText(value));
+    const parsed = JSON.parse(value);
     const absoluteValue = findValue(parsed, [
       "expiresAt",
       "expires_at",
@@ -705,21 +450,15 @@ function extractAccessTokenExpiresAt(value: string) {
   return "";
 }
 
-function findStringValue(value: unknown, keys: string[], visited = new Set<unknown>()): string {
-  if (typeof value === "string") {
-    const parsed = parseNestedJsonString(value);
-    return parsed === undefined ? "" : findStringValue(parsed, keys, visited);
-  }
+function findStringValue(value: unknown, keys: string[]): string {
   if (!value || typeof value !== "object") return "";
-  if (visited.has(value)) return "";
-  visited.add(value);
   const record = value as Record<string, unknown>;
-  const targetKeys = new Set(keys.map((key) => key.toLowerCase()));
-  for (const [key, direct] of Object.entries(record)) {
-    if (targetKeys.has(key.toLowerCase()) && typeof direct === "string" && direct.trim()) return direct.trim();
+  for (const key of keys) {
+    const direct = record[key];
+    if (typeof direct === "string" && direct.trim()) return direct;
   }
   for (const nestedValue of Object.values(record)) {
-    const found = findStringValue(nestedValue, keys, visited);
+    const found = findStringValue(nestedValue, keys);
     if (found) return found;
   }
   return "";
@@ -815,6 +554,67 @@ function maskToken(value: string) {
   if (!value) return "";
   if (value.length <= 16) return "********";
   return `${value.slice(0, 8)}...${value.slice(-6)}`;
+}
+
+function csvEscape(value: unknown) {
+  const text = String(value ?? "");
+  return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+}
+
+function toBatchRows(items: RunHistory[]) {
+  return items.map((item) => ({
+    executedAt: item.executedAt,
+    result: item.ok ? "성공" : "실패",
+    status: item.status,
+    elapsedMs: item.elapsedMs,
+    method: item.method,
+    sampleLabel: item.sampleLabel || item.sampleId,
+    requestUrl: item.requestUrl,
+  }));
+}
+
+function batchResultsToCsv(items: RunHistory[]) {
+  const headers = ["실행시각", "결과", "상태", "소요ms", "메서드", "전문명", "요청URL"];
+  const rows = toBatchRows(items).map((item) =>
+    [
+      item.executedAt,
+      item.result,
+      item.status,
+      item.elapsedMs,
+      item.method,
+      item.sampleLabel,
+      item.requestUrl,
+    ].map(csvEscape).join(",")
+  );
+  return `\ufeff${[headers.map(csvEscape).join(","), ...rows].join("\r\n")}`;
+}
+
+function batchResultsToTsv(items: RunHistory[]) {
+  const headers = ["실행시각", "결과", "상태", "소요ms", "메서드", "전문명", "요청URL"];
+  const rows = toBatchRows(items).map((item) =>
+    [
+      item.executedAt,
+      item.result,
+      item.status,
+      item.elapsedMs,
+      item.method,
+      item.sampleLabel,
+      item.requestUrl,
+    ].map((value) => String(value ?? "").replaceAll("\t", " ").replaceAll(/\r?\n/g, " ")).join("\t")
+  );
+  return [headers.join("\t"), ...rows].join("\n");
+}
+
+function downloadTextFile(fileName: string, content: string, type: string) {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = fileName;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
 }
 
 function isAbsoluteUrl(value: string) {
@@ -928,15 +728,6 @@ function shouldEncryptRequest(requestUrl: string) {
   }
 }
 
-function isTokenRequestUrl(requestUrl: string) {
-  try {
-    const target = new URL(requestUrl);
-    return /\/oauth2\/tokenp?$/i.test(target.pathname) || /\/baas\/v2\/baas_token_issue$/i.test(target.pathname);
-  } catch {
-    return /\/oauth2\/tokenp?$/i.test(requestUrl) || /\/baas\/v2\/baas_token_issue$/i.test(requestUrl);
-  }
-}
-
 function formatResponseHeaders(headers: Record<string, unknown>) {
   return Object.entries(headers)
     .map(([name, value]) => `${name}: ${String(value)}`)
@@ -975,22 +766,6 @@ function getTokenSetupStepKey(draft: TokenRequestDraft): TokenSetupStepKey | nul
   if (draft.id === "kb-b2b-auth-issue") return "authCode";
   if (draft.id === "kb-b2b-token-issue") return "token";
   return null;
-}
-
-function isTokenIssueStepKey(stepKey: TokenSetupStepKey) {
-  return stepKey === "b2cToken" || stepKey === "token";
-}
-
-function accessTokenExpiresAtTimestamp(value: string) {
-  const timestamp = value ? Date.parse(value) : NaN;
-  return Number.isFinite(timestamp) ? timestamp : 0;
-}
-
-function isUsableAccessToken(token: string, expiresAt: string) {
-  const trimmedToken = token.trim();
-  if (!trimmedToken) return false;
-  const timestamp = accessTokenExpiresAtTimestamp(expiresAt);
-  return !timestamp || timestamp > Date.now();
 }
 
 function getStorageKey(storageKey: string | undefined, broker: string | undefined, fallback: string) {
@@ -1060,9 +835,16 @@ function toPrettyBody(value: unknown) {
 
 function tokenDataHeader(device: Record<string, unknown>, hsKey?: string) {
   return {
-    ipAddr: asString(device.ipAddr) || "",
-    macAddr: asString(device.macAddr) || "",
+    udId: asString(device.udId) || "UDID",
+    subChannel: asString(device.subChannel) || "subChannel",
+    deviceModel: asString(device.deviceModel) || "Android",
+    deviceOs: asString(device.deviceOs) || "Android",
+    carrier: asString(device.carrier) || "KT",
+    connectionType: asString(device.connectionType) || "..",
+    appName: asString(device.appName) || "..",
+    appVersion: asString(device.appVersion) || "..",
     ...(hsKey ? { hsKey } : {}),
+    scrNo: asString(device.scrNo) || "0000",
   };
 }
 
@@ -1070,7 +852,10 @@ function normalizeDataEnvelope(value: unknown) {
   const record = asRecord(value);
   if ("dataHeader" in record || "dataBody" in record) {
     return {
-      dataHeader: tokenDataHeader(asRecord(record.dataHeader)),
+      dataHeader: {
+        ...tokenDataHeader({}),
+        ...asRecord(record.dataHeader),
+      },
       dataBody: asRecord(record.dataBody),
     };
   }
@@ -1105,24 +890,6 @@ function tokenDraftPlainBodyText(request: OpenApiTokenRequestDefault, fallback: 
   return toPrettyBody(request.body !== undefined ? request.body : fallback);
 }
 
-function withCredentialPlaceholders(value: unknown) {
-  const body = JSON.parse(JSON.stringify(value ?? {})) as Record<string, unknown>;
-  const dataBody = asRecord(body.dataBody);
-  if (Object.keys(dataBody).length > 0 || "dataBody" in body) {
-    body.dataBody = {
-      ...dataBody,
-      clientId: "{{clientId}}",
-      clientSecret: "{{clientSecret}}",
-    };
-    return body;
-  }
-  return {
-    ...body,
-    clientId: "{{clientId}}",
-    clientSecret: "{{clientSecret}}",
-  };
-}
-
 function buildKbTokenRequestDrafts(defaults: OpenApiTestDefaults, modes: OpenApiTokenMode[]): TokenRequestDraft[] {
   const modeSet = new Set(modes);
   const drafts: TokenRequestDraft[] = [];
@@ -1135,7 +902,7 @@ function buildKbTokenRequestDrafts(defaults: OpenApiTestDefaults, modes: OpenApi
       {
         id: "kb-b2c-token-issue",
         mode: "B2C",
-        label: "OAuth2 토큰 발급",
+        label: "B2C OAuth2 토큰 발급",
         description: "POST /oauth2/token",
         method: "POST",
         baseUrl: b2c.tokenBaseUrl || KB_B2C_TOKEN_BASE_URL,
@@ -1143,11 +910,11 @@ function buildKbTokenRequestDrafts(defaults: OpenApiTestDefaults, modes: OpenApi
         headersText: JSON_HEADERS_TEXT,
         bodyText: toPrettyEnvelopeBody(
           Object.keys(tokenBody).length > 0
-            ? withCredentialPlaceholders(tokenBody)
+            ? tokenBody
             : {
                 dataBody: {
-                  clientId: "{{clientId}}",
-                  clientSecret: "{{clientSecret}}",
+                  clientId: "",
+                  clientSecret: "",
                   grantType: "client_credentials",
                 },
               }
@@ -1399,7 +1166,6 @@ export default function OpenApiTestClient({
   const [tokenDefaultsError, setTokenDefaultsError] = useState("");
   const [accessToken, setAccessToken] = useState("");
   const [accessTokenExpiresAt, setAccessTokenExpiresAt] = useState("");
-  const [tokenIssueStatus, setTokenIssueStatus] = useState<TokenIssueStatus>({ state: "idle" });
   const [approvalKey, setApprovalKey] = useState("");
   const [isInfoSettingsOpen, setIsInfoSettingsOpen] = useState(false);
   const [isTokenSectionOpen, setIsTokenSectionOpen] = useState(false);
@@ -1414,6 +1180,13 @@ export default function OpenApiTestClient({
   const [isSampleEditorOpen, setIsSampleEditorOpen] = useState(false);
   const [isResultHistoryOpen, setIsResultHistoryOpen] = useState(false);
   const [historySearchTerm, setHistorySearchTerm] = useState("");
+  const [selectedBatchSampleIds, setSelectedBatchSampleIds] = useState<string[]>([]);
+  const [isBatchRunning, setIsBatchRunning] = useState(false);
+  const [batchProgress, setBatchProgress] = useState<BatchRunProgress | null>(null);
+  const [batchSummary, setBatchSummary] = useState<BatchRunSummary | null>(null);
+  const [batchResultFilter, setBatchResultFilter] = useState<BatchResultFilter>("all");
+  const [selectedBatchResultId, setSelectedBatchResultId] = useState<string | null>(null);
+  const [batchCopyMessage, setBatchCopyMessage] = useState("");
   const [selectedHistoryResultId, setSelectedHistoryResultId] = useState<string | null>(null);
   const [historyReplayMethod, setHistoryReplayMethod] = useState<OpenApiMethod>("POST");
   const [historyReplayBaseUrl, setHistoryReplayBaseUrl] = useState("");
@@ -1443,6 +1216,9 @@ export default function OpenApiTestClient({
   const managedRealtimeSocketKeysRef = useRef<Record<string, string>>({});
   const managedRealtimeApprovalRetryRef = useRef<Record<string, boolean>>({});
   const managedRealtimeStatesRef = useRef<Record<string, ManagedRealtimeState>>({});
+  const batchStopRequestedRef = useRef(false);
+  const batchAbortControllerRef = useRef<AbortController | null>(null);
+
   const closeManagedRealtimeSocketQuietly = useCallback(() => {
     const socket = managedRealtimeSocketRef.current;
     if (socket) {
@@ -1555,21 +1331,6 @@ export default function OpenApiTestClient({
     });
     return counts;
   }, [sampleResults]);
-  const allBusinessCategoryCounts = useMemo(() => {
-    const counts = makeBusinessGroupMap<number>(() => 0);
-    samples.forEach((sample) => {
-      const category = detectSampleBusinessCategory(sample);
-      counts[category] += 1;
-    });
-    return counts;
-  }, [samples]);
-  const visibleBusinessCategoryOptions = useMemo(
-    () => [
-      "전체목록",
-      ...BUSINESS_GROUPS.filter((category) => allBusinessCategoryCounts[category] > 0),
-    ] as OpenApiBusinessCategory[],
-    [allBusinessCategoryCounts]
-  );
   const displayedCategorizedSamples = useMemo(() => {
     return Object.entries(categorizedSamples).filter(([category, items]) => {
       if (businessCategoryFilter !== "전체목록") return category === businessCategoryFilter;
@@ -1578,6 +1339,13 @@ export default function OpenApiTestClient({
   }, [businessCategoryFilter, categorizedSamples]);
   const displayedSampleCount =
     businessCategoryFilter === "전체목록" ? sampleResults.length : businessCategoryCounts[businessCategoryFilter];
+  const displayedSampleIds = useMemo(
+    () => displayedCategorizedSamples.flatMap(([, items]) => items.filter((sample) => !isWebSocketSample(sample)).map((sample) => sample.id)),
+    [displayedCategorizedSamples]
+  );
+  const selectedDisplayedSampleCount = displayedSampleIds.filter((sampleId) => selectedBatchSampleIds.includes(sampleId)).length;
+  const isAllDisplayedSamplesSelected = displayedSampleIds.length > 0 && selectedDisplayedSampleCount === displayedSampleIds.length;
+
   const resultText = useMemo(() => (result ? prettyJson(result.body) : ""), [result]);
   const filteredAllHistory = useMemo(() => {
     const keyword = allHistorySearchTerm.trim().toLowerCase();
@@ -1634,14 +1402,19 @@ export default function OpenApiTestClient({
     () => selectedSampleHistory.find((item) => item.id === selectedHistoryResultId) ?? selectedSampleHistory[0] ?? null,
     [selectedHistoryResultId, selectedSampleHistory]
   );
-  const selectedSample = useMemo(
-    () => samples.find((sample) => sample.id === selectedSampleId) ?? null,
-    [samples, selectedSampleId]
+  const batchFilteredResults = useMemo(() => {
+    const items = batchSummary?.results ?? [];
+    if (batchResultFilter === "success") return items.filter((item) => item.ok);
+    if (batchResultFilter === "failure") return items.filter((item) => !item.ok);
+    return items;
+  }, [batchResultFilter, batchSummary]);
+  const selectedBatchResult = useMemo(
+    () =>
+      batchFilteredResults.find((item) => item.id === selectedBatchResultId) ??
+      batchFilteredResults[0] ??
+      null,
+    [batchFilteredResults, selectedBatchResultId]
   );
-  const selectedHistorySample = useMemo(() => {
-    const sampleId = selectedHistoryResult?.sampleId;
-    return (sampleId ? samples.find((sample) => sample.id === sampleId) : null) ?? selectedSample;
-  }, [samples, selectedHistoryResult?.sampleId, selectedSample]);
   const isB2BTokenFlow = tokenProcedureModes.includes("B2B");
   const isB2CTokenFlow = tokenProcedureModes.includes("B2C");
   const tokenSetupStepOrder = useMemo(
@@ -1671,7 +1444,6 @@ export default function OpenApiTestClient({
     setUserInfoKey(parsed.userInfoKey || "1");
     setAccessToken(parsed.accessToken || "");
     setAccessTokenExpiresAt(parsed.accessTokenExpiresAt || "");
-    setTokenIssueStatus(parsed.accessToken ? { state: "issued" } : { state: "idle" });
     setApprovalKey(parsed.approvalKey || "");
     setAuthorizationCode(parsed.authorizationCode || "");
     setIssueNo(parsed.issueNo || "");
@@ -2052,11 +1824,8 @@ export default function OpenApiTestClient({
           body: responseText,
           headers: responseHeaders,
         };
-        const tokenExtractOptions = { includeFallbackTokenKeys: isTokenRequestUrl(requestUrl) };
-        const nextAccessToken =
-          extractAccessToken(responseText, tokenExtractOptions) || extractAccessToken(responseHeaders, tokenExtractOptions);
-        const nextAccessTokenExpiresAt =
-          extractAccessTokenExpiresAt(responseText) || extractAccessTokenExpiresAt(responseHeaders);
+        const nextAccessToken = extractAccessToken(responseText);
+        const nextAccessTokenExpiresAt = extractAccessTokenExpiresAt(responseText);
         const nextApprovalKey = extractApprovalKey(responseText);
         if (nextAccessToken) {
           setAccessToken(nextAccessToken);
@@ -2280,6 +2049,173 @@ export default function OpenApiTestClient({
     setSelectedHistoryResultId((currentId) => (currentId && deleteIds.has(currentId) ? null : currentId));
   }, [historyStorageKey, selectedAllHistoryDeleteIds]);
 
+  const toggleBatchSampleSelection = useCallback((sampleId: string) => {
+    setSelectedBatchSampleIds((currentIds) =>
+      currentIds.includes(sampleId) ? currentIds.filter((id) => id !== sampleId) : [...currentIds, sampleId]
+    );
+  }, []);
+
+  const toggleAllDisplayedSamples = useCallback(() => {
+    const displayedIdSet = new Set(displayedSampleIds);
+    setSelectedBatchSampleIds((currentIds) => {
+      if (isAllDisplayedSamplesSelected) {
+        return currentIds.filter((id) => !displayedIdSet.has(id));
+      }
+      return Array.from(new Set([...currentIds, ...displayedSampleIds]));
+    });
+  }, [displayedSampleIds, isAllDisplayedSamplesSelected]);
+
+  const clearBatchSampleSelection = useCallback(() => {
+    setSelectedBatchSampleIds([]);
+  }, []);
+
+  const closeBatchSummary = useCallback(() => {
+    setBatchSummary(null);
+    setBatchResultFilter("all");
+    setSelectedBatchResultId(null);
+    setBatchCopyMessage("");
+  }, []);
+
+  const selectBatchResultFilter = useCallback(
+    (filter: BatchResultFilter) => {
+      const items = batchSummary?.results ?? [];
+      const nextItems =
+        filter === "success" ? items.filter((item) => item.ok) : filter === "failure" ? items.filter((item) => !item.ok) : items;
+      setBatchResultFilter(filter);
+      setSelectedBatchResultId(nextItems[0]?.id ?? null);
+      setBatchCopyMessage("");
+    },
+    [batchSummary]
+  );
+
+  const downloadBatchResults = useCallback(() => {
+    const items = batchFilteredResults;
+    if (items.length === 0) return;
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    downloadTextFile(`openapi-batch-results-${stamp}.csv`, batchResultsToCsv(items), "text/csv;charset=utf-8");
+  }, [batchFilteredResults]);
+
+  const copyBatchResults = useCallback(async () => {
+    const items = batchFilteredResults;
+    if (items.length === 0) return;
+    try {
+      await navigator.clipboard.writeText(batchResultsToTsv(items));
+      setBatchCopyMessage(`${items.length}건 복사됨`);
+    } catch {
+      setBatchCopyMessage("복사에 실패했습니다.");
+    }
+  }, [batchFilteredResults]);
+
+  const requestStopBatchRun = useCallback(() => {
+    if (!isBatchRunning) return;
+    batchStopRequestedRef.current = true;
+    batchAbortControllerRef.current?.abort();
+    setBatchProgress((current) =>
+      current
+        ? {
+            ...current,
+            currentLabel: `${current.currentLabel} (중지 요청됨)`,
+          }
+        : current
+    );
+  }, [isBatchRunning]);
+
+  const sendSelectedBatchSamples = useCallback(async () => {
+    const selectedIdSet = new Set(selectedBatchSampleIds);
+    const targetSamples = samples.filter((sample) => selectedIdSet.has(sample.id) && !isWebSocketSample(sample));
+    if (targetSamples.length === 0) return;
+
+    const batchResults: RunHistory[] = [];
+    const controller = new AbortController();
+    batchStopRequestedRef.current = false;
+    batchAbortControllerRef.current = controller;
+    setIsBatchRunning(true);
+    setBatchProgress({
+      total: targetSamples.length,
+      completed: 0,
+      currentIndex: 0,
+      currentLabel: "대기 중",
+    });
+    setBatchSummary(null);
+    setBatchCopyMessage("");
+
+    try {
+      for (const [index, sample] of targetSamples.entries()) {
+        if (batchStopRequestedRef.current) break;
+        const targetMethod = ensureMethod(sample.method);
+        setBatchProgress({
+          total: targetSamples.length,
+          completed: index,
+          currentIndex: index + 1,
+          currentLabel: sample.label,
+        });
+        try {
+          const outcome = await runRequestWithValues({
+            targetMethod,
+            targetBaseUrl: sample.baseUrl || defaultBaseUrl,
+            targetPath: sample.path,
+            targetHeadersText: toPrettyBody(sample.headers ?? {}),
+            targetQueryText: toPrettyBody(sample.query ?? {}),
+            targetBodyText: isBodyMethod(targetMethod) ? toPrettyEnvelopeBody(sample.body ?? {}) : "{}",
+            historySampleId: sample.id,
+            historySampleLabel: sample.label,
+            openHistoryAfterRun: false,
+            signal: controller.signal,
+          });
+          if (outcome?.historyItem) batchResults.push(outcome.historyItem);
+        } catch {
+          // Keep the batch moving so one failed sample does not block the rest.
+        }
+        setBatchProgress({
+          total: targetSamples.length,
+          completed: index + 1,
+          currentIndex: index + 1,
+          currentLabel: sample.label,
+        });
+        if (batchStopRequestedRef.current) break;
+      }
+
+      const success = batchResults.filter((item) => item.ok).length;
+      const failure = batchResults.length - success;
+      const defaultFilter: BatchResultFilter = failure > 0 ? "failure" : "success";
+      const defaultItems = defaultFilter === "failure" ? batchResults.filter((item) => !item.ok) : batchResults.filter((item) => item.ok);
+
+      setBatchSummary({
+        id: makeId("batch"),
+        executedAt: new Date().toLocaleString("en-US"),
+        results: batchResults,
+        total: batchResults.length,
+        success,
+        failure,
+        stopped: batchStopRequestedRef.current,
+      });
+      setBatchResultFilter(defaultFilter);
+      setSelectedBatchResultId(defaultItems[0]?.id ?? batchResults[0]?.id ?? null);
+    } finally {
+      batchAbortControllerRef.current = null;
+      batchStopRequestedRef.current = false;
+      setBatchProgress(null);
+      setIsBatchRunning(false);
+    }
+  }, [defaultBaseUrl, isBodyMethod, runRequestWithValues, samples, selectedBatchSampleIds]);
+
+  const sendSampleDirect = useCallback(
+    async (sample: OpenApiSample) => {
+      const targetMethod = ensureMethod(sample.method);
+      await runRequestWithValues({
+        targetMethod,
+        targetBaseUrl: sample.baseUrl || defaultBaseUrl,
+        targetPath: sample.path,
+        targetHeadersText: toPrettyBody(sample.headers ?? {}),
+        targetQueryText: toPrettyBody(sample.query ?? {}),
+        targetBodyText: isBodyMethod(targetMethod) ? toPrettyEnvelopeBody(sample.body ?? {}) : "{}",
+        historySampleId: sample.id,
+        historySampleLabel: sample.label,
+      });
+    },
+    [defaultBaseUrl, isBodyMethod, runRequestWithValues]
+  );
+
   const updateTokenDraftBody = useCallback((draftId: string, bodyText: string) => {
     setTokenRequestDrafts((currentDrafts) =>
       currentDrafts.map((draft) => (draft.id === draftId ? { ...draft, bodyText } : draft))
@@ -2289,9 +2225,6 @@ export default function OpenApiTestClient({
   const sendTokenDraft = useCallback(
     async (draft: TokenRequestDraft) => {
       const stepKey = getTokenSetupStepKey(draft);
-      if (stepKey && isTokenIssueStepKey(stepKey)) {
-        setTokenIssueStatus({ state: "running", updatedAt: new Date().toISOString() });
-      }
       const requestResult = await runRequestWithValues({
         targetMethod: draft.method,
         targetBaseUrl: draft.baseUrl,
@@ -2302,13 +2235,6 @@ export default function OpenApiTestClient({
         historySampleId: draft.id,
         historySampleLabel: draft.label,
       });
-      if (stepKey && isTokenIssueStepKey(stepKey) && !requestResult) {
-        setTokenIssueStatus({ state: "failed", updatedAt: new Date().toISOString() });
-        return;
-      }
-      if (stepKey && isTokenIssueStepKey(stepKey) && requestResult && !requestResult.ok) {
-        setTokenIssueStatus({ state: "failed", status: requestResult.status, updatedAt: new Date().toISOString() });
-      }
       if (requestResult?.ok && stepKey) {
         if (stepKey === "authCode") {
           const authValues = extractAuthIssueValues(requestResult.body);
@@ -2333,35 +2259,12 @@ export default function OpenApiTestClient({
             );
           }
         }
-        const tokenExtractOptions = { includeFallbackTokenKeys: true };
-        const issuedAccessToken =
-          extractAccessToken(requestResult.body, tokenExtractOptions) ||
-          extractAccessToken(requestResult.headers, tokenExtractOptions) ||
-          accessToken;
-        const issuedAccessTokenExpiresAt =
-          extractAccessTokenExpiresAt(requestResult.body) ||
-          extractAccessTokenExpiresAt(requestResult.headers) ||
-          accessTokenExpiresAt;
-        const shouldMarkStepComplete = isTokenIssueStepKey(stepKey)
-          ? isUsableAccessToken(issuedAccessToken, issuedAccessTokenExpiresAt)
-          : true;
-        if (isTokenIssueStepKey(stepKey) && requestResult.ok && !issuedAccessToken) {
-          setTokenIssueStatus({ state: "issuedWithoutToken", status: requestResult.status, updatedAt: new Date().toISOString() });
-          setError("토큰 발급 응답은 성공했지만 access_token/token 값을 찾지 못했습니다. 응답 본문의 토큰 필드명을 확인하세요.");
-        }
-        if (isTokenIssueStepKey(stepKey) && issuedAccessToken) {
-          setAccessToken(issuedAccessToken);
-          setAccessTokenExpiresAt(issuedAccessTokenExpiresAt || "");
-          setTokenIssueStatus({ state: "issued", status: requestResult.status, updatedAt: new Date().toISOString() });
-        }
-        if (shouldMarkStepComplete) {
-          setCompletedTokenSetupSteps((currentSteps) =>
-            currentSteps.includes(stepKey) ? currentSteps : [...currentSteps, stepKey]
-          );
-        }
+        setCompletedTokenSetupSteps((currentSteps) =>
+          currentSteps.includes(stepKey) ? currentSteps : [...currentSteps, stepKey]
+        );
       }
     },
-    [accessToken, accessTokenExpiresAt, runRequestWithValues]
+    [runRequestWithValues]
   );
 
   const openSampleInEditor = useCallback(
@@ -3210,49 +3113,21 @@ export default function OpenApiTestClient({
     setShouldPersistCredentials(true);
   };
 
-  const tokenExpiresAtTimestamp = accessTokenExpiresAtTimestamp(accessTokenExpiresAt);
-  const hasTokenExpiry = Boolean(tokenExpiresAtTimestamp);
+  const tokenExpiresAtTimestamp = accessTokenExpiresAt ? Date.parse(accessTokenExpiresAt) : 0;
+  const hasTokenExpiry = Boolean(tokenExpiresAtTimestamp && !Number.isNaN(tokenExpiresAtTimestamp));
   const isAccessTokenExpired = Boolean(accessToken && hasTokenExpiry && tokenExpiresAtTimestamp <= Date.now());
-  const hasUsableAccessToken = isUsableAccessToken(accessToken, accessTokenExpiresAt);
-  const isTokenSetupStepComplete = (stepKey: TokenSetupStepKey) =>
-    isTokenIssueStepKey(stepKey) ? hasUsableAccessToken : completedTokenSetupSteps.includes(stepKey);
-  const tokenIssueUpdatedAtText = tokenIssueStatus.updatedAt
-    ? new Date(tokenIssueStatus.updatedAt).toLocaleString("ko-KR")
-    : "";
-  const tokenStatusLabel = accessToken
-    ? isAccessTokenExpired
-      ? "토큰 만료"
-      : "토큰 발급 완료"
-    : tokenIssueStatus.state === "running"
-    ? "토큰 발급 중"
-    : tokenIssueStatus.state === "issuedWithoutToken"
-    ? "토큰 발급 응답 확인"
-    : tokenIssueStatus.state === "failed"
-    ? "토큰 발급 실패"
-    : "토큰 없음";
-  const tokenStatusDescription = accessToken
-    ? isAccessTokenExpired
-      ? "토큰 만료시간이 지났습니다. 토큰을 다시 발급하세요."
-      : "전문 전송에 사용할 유효한 토큰이 저장되어 있습니다."
-    : tokenIssueStatus.state === "running"
-    ? "토큰 발급 요청을 전송하고 있습니다."
-    : tokenIssueStatus.state === "issuedWithoutToken"
-    ? "토큰 발급 응답은 성공했지만 화면에서 사용할 토큰 값을 찾지 못했습니다. 결과내역의 응답 본문을 확인하세요."
-    : tokenIssueStatus.state === "failed"
-    ? "토큰 발급 요청이 실패했습니다. 결과내역의 응답 상태와 본문을 확인하세요."
-    : "전문 전송 전 토큰발급을 먼저 진행하세요.";
+  const tokenStatusLabel = !accessToken ? "토큰 없음" : isAccessTokenExpired ? "토큰 만료" : "테스트 가능";
+  const tokenStatusDescription = !accessToken
+    ? "샘플 API 테스트 전 토큰발급을 먼저 진행하세요."
+    : isAccessTokenExpired
+    ? "토큰 만료시간이 지났습니다. 토큰을 다시 발급하세요."
+    : "샘플 API 테스트에 사용할 토큰이 저장되어 있습니다.";
   const tokenExpiresAtText = hasTokenExpiry ? new Date(tokenExpiresAtTimestamp).toLocaleString("ko-KR") : "만료시간 정보 없음";
-  const tokenStatusClass = accessToken
-    ? isAccessTokenExpired
-      ? "border-red-200 bg-red-50 text-red-700"
-      : "border-emerald-200 bg-emerald-50 text-emerald-700"
-    : tokenIssueStatus.state === "running"
-    ? "border-blue-200 bg-blue-50 text-blue-700"
-    : tokenIssueStatus.state === "issuedWithoutToken"
+  const tokenStatusClass = !accessToken
     ? "border-amber-200 bg-amber-50 text-amber-800"
-    : tokenIssueStatus.state === "failed"
+    : isAccessTokenExpired
     ? "border-red-200 bg-red-50 text-red-700"
-    : "border-amber-200 bg-amber-50 text-amber-800";
+    : "border-emerald-200 bg-emerald-50 text-emerald-700";
   const selectedRealtimeManagedState = selectedRealtimeSample ? managedRealtimeStates[selectedRealtimeSample.id] : undefined;
   const selectedRealtimeEnabled = Boolean(selectedRealtimeManagedState?.enabled);
   const selectedRealtimeStatus = selectedRealtimeManagedState?.status || "OFF";
@@ -3277,7 +3152,7 @@ export default function OpenApiTestClient({
     if (history.length === 0) {
       return (
         <p className="mt-3 rounded-lg border border-dashed border-slate-200 bg-white p-4 text-sm text-slate-500">
-          아직 전송 이력이 없습니다.
+          아직 테스트 이력이 없습니다.
         </p>
       );
     }
@@ -3384,15 +3259,13 @@ export default function OpenApiTestClient({
         <section className={`mt-3 rounded-lg border px-4 py-3 ${tokenStatusClass}`}>
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <p className="text-xs font-black">전문 전송 상태</p>
+              <p className="text-xs font-black">샘플 API 테스트 상태</p>
               <p className="mt-1 text-sm font-black">{tokenStatusLabel}</p>
               <p className="mt-1 text-xs">{tokenStatusDescription}</p>
             </div>
             <div className="grid gap-1 text-right text-xs">
               <span className="font-mono font-bold">토큰: {accessToken ? maskToken(accessToken) : "-"}</span>
               <span className="font-bold">만료시간: {tokenExpiresAtText}</span>
-              {tokenIssueUpdatedAtText ? <span className="font-bold">최근 발급: {tokenIssueUpdatedAtText}</span> : null}
-              {tokenIssueStatus.status !== undefined ? <span className="font-bold">응답상태: {tokenIssueStatus.status}</span> : null}
             </div>
           </div>
         </section>
@@ -3528,7 +3401,7 @@ export default function OpenApiTestClient({
           <>
             {normalizedTokenProcedures.length === 0 ? (
               <p className="mt-2 text-sm text-slate-600">
-                인증 정보를 입력한 뒤 전문을 전송하세요. 기본 URL은 상단 선택값을 사용합니다.
+                인증 정보를 입력한 뒤 샘플 API를 실행하세요. 기본 URL은 상단 선택값을 사용합니다.
               </p>
             ) : (
               <div className="mt-3 grid gap-3">
@@ -3577,12 +3450,12 @@ export default function OpenApiTestClient({
                         const meta = TOKEN_SETUP_STEP_META[stepKey];
                         const previousStepsComplete = tokenSetupSteps
                           .slice(0, index)
-                          .every((previousStep) => isTokenSetupStepComplete(previousStep.stepKey));
-                        const isComplete = isTokenSetupStepComplete(stepKey);
+                          .every((previousStep) => completedTokenSetupSteps.includes(previousStep.stepKey));
+                        const isComplete = completedTokenSetupSteps.includes(stepKey) || (stepKey === "token" && Boolean(accessToken));
                         const isAgreementStep = stepKey === "terms" || stepKey === "financial";
                         const canSkipAgreementPrerequisites = isB2BTokenFlow && stepKey === "authCode";
                         const hasAuthCodePrerequisite =
-                          isTokenSetupStepComplete("authCode") || Boolean(authorizationCode.trim());
+                          completedTokenSetupSteps.includes("authCode") || Boolean(authorizationCode.trim());
                         const prerequisiteComplete =
                           canSkipAgreementPrerequisites || (isB2BTokenFlow && stepKey === "token" ? hasAuthCodePrerequisite : previousStepsComplete);
                         const canSelect = prerequisiteComplete || isComplete || index === 0;
@@ -3624,12 +3497,12 @@ export default function OpenApiTestClient({
                       const meta = TOKEN_SETUP_STEP_META[stepKey];
                       const previousStepsComplete = tokenSetupSteps
                         .slice(0, index)
-                        .every((previousStep) => isTokenSetupStepComplete(previousStep.stepKey));
-                      const isComplete = isTokenSetupStepComplete(stepKey);
+                        .every((previousStep) => completedTokenSetupSteps.includes(previousStep.stepKey));
+                      const isComplete = completedTokenSetupSteps.includes(stepKey) || (stepKey === "token" && Boolean(accessToken));
                       const isAgreementStep = stepKey === "terms" || stepKey === "financial";
                       const canSkipAgreementPrerequisites = isB2BTokenFlow && stepKey === "authCode";
                       const hasAuthCodePrerequisite =
-                        isTokenSetupStepComplete("authCode") || Boolean(authorizationCode.trim());
+                        completedTokenSetupSteps.includes("authCode") || Boolean(authorizationCode.trim());
                       const prerequisiteComplete =
                         canSkipAgreementPrerequisites || (isB2BTokenFlow && stepKey === "token" ? hasAuthCodePrerequisite : previousStepsComplete);
                       const canRun = prerequisiteComplete && !isRunning;
@@ -3677,7 +3550,7 @@ export default function OpenApiTestClient({
                             </button>
                           </div>
                           <textarea
-                            value={applyRequestVariables(draft.bodyText, requestVariables)}
+                            value={draft.bodyText}
                             onChange={(event) => updateTokenDraftBody(draft.id, event.target.value)}
                             rows={draft.id.includes("auth") ? 10 : 9}
                             className="mt-3 w-full rounded-md border border-slate-200 bg-white px-3 py-2 font-mono text-xs outline-none focus:border-[#fcb514]"
@@ -3709,7 +3582,7 @@ export default function OpenApiTestClient({
                           </button>
                         </div>
                         <textarea
-                          value={applyRequestVariables(draft.bodyText, requestVariables)}
+                          value={draft.bodyText}
                           onChange={(event) => updateTokenDraftBody(draft.id, event.target.value)}
                           rows={draft.id.includes("auth") ? 10 : 9}
                           className="mt-3 w-full rounded-md border border-slate-200 px-3 py-2 font-mono text-xs outline-none focus:border-[#fcb514]"
@@ -3729,7 +3602,7 @@ export default function OpenApiTestClient({
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <h2 className="text-sm font-black text-slate-700">결과내역</h2>
-                <p className="mt-1 text-xs text-slate-500">토큰발급과 전문 전송 결과가 최신순으로 누적됩니다.</p>
+                <p className="mt-1 text-xs text-slate-500">토큰발급과 전문 테스트 실행 결과가 최신순으로 누적됩니다.</p>
               </div>
               <span className="rounded-full bg-white px-3 py-1 text-xs font-black text-slate-600">
                 {allHistorySearchTerm.trim() ? `${filteredAllHistory.length} / ${history.length}건` : `${history.length}건`}
@@ -3966,25 +3839,27 @@ export default function OpenApiTestClient({
       ) : null}
 
       {!isRealtimeView ? (
-        <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="flex flex-wrap items-center gap-3">
-          <h2 className="text-base font-black text-[#2c2a26]">전문 API</h2>
-            <label className="flex min-w-[280px] max-w-md flex-1 items-center gap-2 text-sm font-bold text-slate-700">
-              검색
-              <input
-                value={searchTerm}
-                onChange={(event) => setSearchTerm(event.target.value)}
-                className="rounded-md border border-slate-200 px-3 py-2 font-mono text-sm outline-none"
-                placeholder="ID, 이름, 설명으로 검색"
-              />
-            </label>
-            <span className="shrink-0 rounded-full bg-slate-100 px-3 py-2 text-xs font-black text-slate-500">
-              총 {samples.length}건 중 {displayedSampleCount}건 표시
-            </span>
-          </div>
+      <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="flex flex-wrap items-center gap-3">
+          <h2 className="text-base font-black text-[#2c2a26]">샘플 API</h2>
+              <label className="flex min-w-[280px] max-w-md flex-1 items-center gap-2 text-sm font-bold text-slate-700">
+                      검색
+                      <input
+                        value={searchTerm}
+                        onChange={(event) => setSearchTerm(event.target.value)}
+                        className="rounded-md border border-slate-200 px-3 py-2 font-mono text-sm outline-none"
+                        placeholder="ID, 이름, 설명으로 검색"
+                      />
+                    </label>
+              <span className="shrink-0 rounded-full bg-slate-100 px-3 py-2 text-xs font-black text-slate-500">
+                총 {samples.length}건 중 {displayedSampleCount}건 표시
+              </span>
+        </div>
+        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+        </div>
         <div className="mt-3 flex flex-wrap gap-2">
-          {visibleBusinessCategoryOptions.map((category) => {
-            const count = category === "전체목록" ? samples.length : allBusinessCategoryCounts[category];
+          {BUSINESS_CATEGORY_OPTIONS.map((category) => {
+            const count = category === "전체목록" ? sampleResults.length : businessCategoryCounts[category];
             return (
               <button
                 key={category}
@@ -3999,6 +3874,242 @@ export default function OpenApiTestClient({
             );
           })}
         </div>
+        <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+          <label className="inline-flex items-center gap-2 text-sm font-black text-slate-700">
+            <input
+              type="checkbox"
+              checked={isAllDisplayedSamplesSelected}
+              disabled={displayedSampleIds.length === 0}
+              onChange={toggleAllDisplayedSamples}
+              className="h-4 w-4 rounded border-slate-300"
+              style={CHECKBOX_INPUT_STYLE}
+            />
+            현재 목록 전체 선택
+          </label>
+          <span className="rounded-full bg-white px-3 py-1 text-xs font-black text-slate-500">
+            선택 {selectedBatchSampleIds.length}건
+          </span>
+          <button
+            type="button"
+            onClick={clearBatchSampleSelection}
+            disabled={selectedBatchSampleIds.length === 0}
+            className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-black text-slate-600 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            선택 해제
+          </button>
+          <button
+            type="button"
+            onClick={sendSelectedBatchSamples}
+            disabled={isRunning || isBatchRunning || selectedBatchSampleIds.length === 0}
+            className="rounded-full bg-slate-900 px-4 py-1.5 text-xs font-black text-white disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {isBatchRunning ? "일괄 전송 중..." : "선택 전문 일괄 전송"}
+          </button>
+          {isBatchRunning ? (
+            <button
+              type="button"
+              onClick={requestStopBatchRun}
+              className="rounded-full border border-red-200 bg-white px-4 py-1.5 text-xs font-black text-red-600 hover:bg-red-50"
+            >
+              전송 중지
+            </button>
+          ) : null}
+        </div>
+        {batchProgress ? (
+          <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-black text-amber-900">
+                  일괄 전송 진행 {batchProgress.completed} / {batchProgress.total}
+                </p>
+                <p className="mt-1 break-all text-xs font-bold text-amber-700">
+                  현재 {batchProgress.currentIndex || 1}번째: {batchProgress.currentLabel}
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="rounded-full bg-white px-3 py-1 text-xs font-black text-amber-800">
+                  남은 {Math.max(batchProgress.total - batchProgress.completed, 0)}건
+                </span>
+                <button
+                  type="button"
+                  onClick={requestStopBatchRun}
+                  className="rounded-full border border-red-200 bg-white px-3 py-1 text-xs font-black text-red-600 hover:bg-red-50"
+                >
+                  중지
+                </button>
+              </div>
+            </div>
+            <div className="mt-2 h-2 overflow-hidden rounded-full bg-white">
+              <div
+                className="h-full rounded-full bg-amber-500 transition-all"
+                style={{ width: `${batchProgress.total > 0 ? Math.round((batchProgress.completed / batchProgress.total) * 100) : 0}%` }}
+              />
+            </div>
+          </div>
+        ) : null}
+        {batchSummary ? (
+          <section className="mt-3 rounded-xl border border-slate-200 bg-white p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-black text-[#2c2a26]">최근 일괄 전송 결과</h3>
+                <p className="mt-1 text-xs text-slate-500">
+                  {batchSummary.executedAt} / {batchSummary.stopped ? "중지됨" : "완료"} / 총 {batchSummary.total}건
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => selectBatchResultFilter("all")}
+                  className={`rounded-md border px-3 py-1.5 text-xs font-black ${
+                    batchResultFilter === "all"
+                      ? "border-slate-900 bg-slate-900 text-white"
+                      : "border-slate-200 bg-white text-slate-700"
+                  }`}
+                >
+                  전체 {batchSummary.total}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => selectBatchResultFilter("success")}
+                  className={`rounded-md border px-3 py-1.5 text-xs font-black ${
+                    batchResultFilter === "success"
+                      ? "border-emerald-600 bg-emerald-600 text-white"
+                      : "border-emerald-200 bg-emerald-50 text-emerald-700"
+                  }`}
+                >
+                  성공 {batchSummary.success}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => selectBatchResultFilter("failure")}
+                  className={`rounded-md border px-3 py-1.5 text-xs font-black ${
+                    batchResultFilter === "failure"
+                      ? "border-red-600 bg-red-600 text-white"
+                      : "border-red-200 bg-red-50 text-red-700"
+                  }`}
+                >
+                  실패 {batchSummary.failure}
+                </button>
+                <button
+                  type="button"
+                  onClick={downloadBatchResults}
+                  disabled={batchFilteredResults.length === 0}
+                  className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-black text-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  엑셀 다운로드
+                </button>
+                <button
+                  type="button"
+                  onClick={copyBatchResults}
+                  disabled={batchFilteredResults.length === 0}
+                  className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-black text-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  목록 복사
+                </button>
+                {batchCopyMessage ? <span className="text-xs font-bold text-slate-500">{batchCopyMessage}</span> : null}
+                <button
+                  type="button"
+                  onClick={closeBatchSummary}
+                  className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-black text-slate-700 hover:bg-slate-100"
+                >
+                  닫기
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-3 grid min-h-0 gap-3 lg:grid-cols-[360px_1fr]">
+              <aside className="max-h-80 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-2">
+                {batchFilteredResults.length === 0 ? (
+                  <p className="p-2 text-xs text-slate-500">표시할 결과가 없습니다.</p>
+                ) : (
+                  <ul className="space-y-2">
+                    {batchFilteredResults.map((item) => (
+                      <li key={item.id}>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedBatchResultId(item.id)}
+                          className={`w-full rounded-md border p-2 text-left transition ${
+                            selectedBatchResult?.id === item.id
+                              ? "border-[#2c2a26] bg-white"
+                              : "border-slate-200 bg-white hover:bg-slate-100"
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="truncate text-xs font-black text-slate-700">
+                              {item.sampleLabel || item.sampleId}
+                            </span>
+                            <span
+                              className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-black ${
+                                item.ok ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"
+                              }`}
+                            >
+                              {item.ok ? "성공" : "실패"} {item.status}
+                            </span>
+                          </div>
+                          <p className="mt-1 truncate font-mono text-xs text-slate-500">{item.requestUrl}</p>
+                          <p className="mt-1 text-xs text-slate-500">{item.elapsedMs}ms</p>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </aside>
+
+              <article className="max-h-80 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-3">
+                {selectedBatchResult ? (
+                  <>
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <h4 className="text-xs font-black text-slate-700">
+                          {selectedBatchResult.sampleLabel || selectedBatchResult.sampleId}
+                        </h4>
+                        <p className="mt-1 break-all font-mono text-xs text-slate-500">
+                          {selectedBatchResult.method} {selectedBatchResult.requestUrl}
+                        </p>
+                      </div>
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-xs font-black ${
+                          selectedBatchResult.ok ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"
+                        }`}
+                      >
+                        {selectedBatchResult.ok ? "성공" : "실패"} / 상태 {selectedBatchResult.status} / {selectedBatchResult.elapsedMs}ms
+                      </span>
+                    </div>
+
+                    <details className="mt-3">
+                      <summary className="cursor-pointer text-xs font-black text-slate-700">요청 헤더</summary>
+                      <pre className="mt-2 max-h-32 overflow-auto rounded-md bg-white p-2 text-xs">
+                        {prettyJson(selectedBatchResult.requestHeaders ?? "{}")}
+                      </pre>
+                    </details>
+                    {selectedBatchResult.requestBody ? (
+                      <details className="mt-3" open>
+                        <summary className="cursor-pointer text-xs font-black text-slate-700">요청 바디 전문</summary>
+                        <pre className="mt-2 max-h-40 overflow-auto rounded-md bg-white p-2 text-xs">
+                          {prettyJson(selectedBatchResult.requestBody)}
+                        </pre>
+                      </details>
+                    ) : null}
+                    {selectedBatchResult.headers ? (
+                      <details className="mt-3">
+                        <summary className="cursor-pointer text-xs font-black text-slate-700">응답 헤더</summary>
+                        <pre className="mt-2 max-h-32 overflow-auto rounded-md bg-white p-2 text-xs">
+                          {selectedBatchResult.headers}
+                        </pre>
+                      </details>
+                    ) : null}
+                    <h5 className="mt-3 text-xs font-black text-slate-700">응답 본문 전문</h5>
+                    <pre className="mt-2 max-h-48 overflow-auto rounded-md bg-white p-2 text-xs">
+                      {prettyJson(selectedBatchResult.body ?? "")}
+                    </pre>
+                  </>
+                ) : (
+                  <p className="text-xs text-slate-500">왼쪽 결과 목록에서 전문을 선택하세요.</p>
+                )}
+              </article>
+            </div>
+          </section>
+        ) : null}
         <div className="mt-3 max-h-[420px] overflow-y-auto pr-1">
           {displayedCategorizedSamples.map(([category, items]) => (
             <section key={category} className="mb-5">
@@ -4006,43 +4117,61 @@ export default function OpenApiTestClient({
                 {category} ({items.length})
               </h3>
               {items.length === 0 ? (
-                <p className="mt-2 text-xs text-slate-500">{category} 전문이 없습니다.</p>
+                <p className="mt-2 text-xs text-slate-500">{category} 샘플이 없습니다.</p>
               ) : (
                 <div className="mt-2 grid gap-2 sm:grid-cols-2">
                   {items.map((sample) => {
                     const sampleIsWebSocket = isWebSocketSample(sample);
                     return (
-                      <article key={sample.id} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0 flex-1">
-                            <p className="mt-1 font-bold text-slate-700">
-                              {sample.label}
-                              {sampleIsWebSocket ? (
-                                <span className="ml-2 rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-black text-blue-700">
-                                  WEBSOCKET
-                                </span>
-                              ) : null}
-                            </p>
-                          </div>
-                          <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                    <article key={sample.id} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <label className="flex min-w-0 flex-1 items-start gap-2">
+                          <input
+                            type="checkbox"
+                            checked={selectedBatchSampleIds.includes(sample.id)}
+                            disabled={sampleIsWebSocket}
+                            onChange={() => toggleBatchSampleSelection(sample.id)}
+                            className="mt-1 h-4 w-4 shrink-0 rounded border-slate-300"
+                            style={CHECKBOX_INPUT_STYLE}
+                          />
+                          <span className="mt-1 font-bold text-slate-700">
+                            {sample.label}
+                            {sampleIsWebSocket ? (
+                              <span className="ml-2 rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-black text-blue-700">
+                                WEBSOCKET
+                              </span>
+                            ) : null}
+                          </span>
+                        </label>
+                        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                          <button
+                            type="button"
+                            onClick={() => (sampleIsWebSocket ? openRealtimeSample(sample) : openSampleInEditor(sample))}
+                            disabled={isRunning || isBatchRunning}
+                            className="rounded-md bg-[#2c2a26] px-3 py-1.5 text-xs font-black text-white transition hover:bg-[#3b352c] disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            {isRunning || isBatchRunning ? "불러오는 중..." : sampleIsWebSocket ? "실시간 연결" : "전문 테스트"}
+                          </button>
+                          {!sampleIsWebSocket ? (
                             <button
                               type="button"
-                              onClick={() => (sampleIsWebSocket ? openRealtimeSample(sample) : openSampleInEditor(sample))}
-                              disabled={isRunning}
-                              className="rounded-md bg-[#2c2a26] px-3 py-1.5 text-xs font-black text-white transition hover:bg-[#3b352c] disabled:cursor-not-allowed disabled:opacity-60"
+                              onClick={() => sendSampleDirect(sample)}
+                              disabled={isRunning || isBatchRunning}
+                              className="rounded-md border border-[#2c2a26] bg-white px-3 py-1.5 text-xs font-black text-[#2c2a26] transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
                             >
-                              {isRunning ? "불러오는 중..." : sampleIsWebSocket ? "실시간 연결" : "전문 전송"}
+                              {isRunning || isBatchRunning ? "전송 중..." : "바로 실행"}
                             </button>
-                          </div>
+                          ) : null}
                         </div>
-                      </article>
+                      </div>
+                    </article>
                     );
                   })}
                 </div>
               )}
             </section>
           ))}
-          {displayedSampleCount === 0 ? <p className="text-sm text-slate-500">조건에 맞는 전문이 없습니다.</p> : null}
+          {displayedSampleCount === 0 ? <p className="text-sm text-slate-500">조건에 맞는 샘플이 없습니다.</p> : null}
         </div>
       </section>
       ) : null}
@@ -4056,11 +4185,11 @@ export default function OpenApiTestClient({
             }
           }}
         >
-          <section className="flex max-h-[min(92vh,860px)] w-full max-w-[96rem] flex-col overflow-hidden rounded-xl border border-slate-200 bg-white p-5 shadow-xl">
+          <section className="flex max-h-[min(92vh,860px)] w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-slate-200 bg-white p-5 shadow-xl">
             <div className="mb-4 flex shrink-0 items-start justify-between gap-3">
               <div>
                 <h2 className="text-base font-black text-[#2c2a26]">
-                  요청 전문 수정
+                  샘플 요청 전문 수정
                 </h2>
                 <p className="mt-1 text-xs text-slate-500">{selectedSampleLabel}</p>
               </div>
@@ -4073,8 +4202,7 @@ export default function OpenApiTestClient({
               </button>
             </div>
 
-            <div className="grid min-h-0 flex-1 gap-4 overflow-hidden lg:grid-cols-[minmax(0,1fr)_440px]">
-              <div className="min-h-0 overflow-y-auto pr-1 pb-3">
+            <div className="flex-1 overflow-y-auto pr-1 pb-3">
               <div className="grid gap-4 md:grid-cols-2">
                 <label className="grid gap-1 text-sm font-black text-slate-700">
                   API 기본 URL
@@ -4123,10 +4251,11 @@ export default function OpenApiTestClient({
               {isEditorBodyMethod(editorMethod) ? (
                 <label className="mt-4 grid gap-1 text-sm font-black text-slate-700">
                   바디 (JSON)
-                  <RequiredJsonBodyEditor
+                  <textarea
                     value={editorBodyText}
-                    onChange={setEditorBodyText}
+                    onChange={(event) => setEditorBodyText(event.target.value)}
                     rows={10}
+                    className="rounded-md border border-slate-200 px-3 py-2 font-mono text-sm outline-none"
                   />
                 </label>
               ) : null}
@@ -4180,11 +4309,6 @@ export default function OpenApiTestClient({
                   </ul>
                 )}
               </section>
-              </div>
-
-              <aside className="min-h-0 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-3">
-                <SampleSpecPanel sample={selectedSample} />
-              </aside>
             </div>
 
             <div className="mt-4 flex shrink-0 items-center justify-end gap-2 border-t border-slate-100 pt-4">
@@ -4201,7 +4325,7 @@ export default function OpenApiTestClient({
                 disabled={isRunning}
                 className="rounded-md bg-[#2c2a26] px-3 py-2 text-xs font-black text-white transition hover:bg-[#3b352c] disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {isRunning ? "전송 중..." : "전문 전송"}
+                {isRunning ? "전송 중..." : "전문 테스트 실행"}
               </button>
             </div>
           </section>
@@ -4336,10 +4460,10 @@ export default function OpenApiTestClient({
             }
           }}
         >
-          <section className="flex max-h-[min(90vh,820px)] w-full max-w-[100rem] flex-col overflow-hidden rounded-xl border border-slate-200 bg-white p-5 shadow-2xl">
+          <section className="flex max-h-[min(90vh,820px)] w-full max-w-6xl flex-col overflow-hidden rounded-xl border border-slate-200 bg-white p-5 shadow-2xl">
             <div className="mb-4 flex shrink-0 items-start justify-between gap-3">
               <div>
-                <h2 className="text-base font-black text-[#2c2a26]">전문 전송 결과</h2>
+                <h2 className="text-base font-black text-[#2c2a26]">전문 테스트 결과 히스토리</h2>
                 <p className="mt-1 text-xs text-slate-500">{selectedSampleLabel}</p>
               </div>
               <button
@@ -4351,10 +4475,10 @@ export default function OpenApiTestClient({
               </button>
             </div>
 
-            <div className="grid min-h-0 flex-1 gap-4 overflow-hidden md:grid-cols-[320px_minmax(0,1fr)] xl:grid-cols-[320px_minmax(0,1fr)_440px]">
+            <div className="grid min-h-0 flex-1 gap-4 overflow-hidden md:grid-cols-[320px_1fr]">
               <aside className="min-h-0 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <h3 className="text-xs font-black text-slate-700">전송 이력</h3>
+                  <h3 className="text-xs font-black text-slate-700">테스트 이력</h3>
                   <button
                     type="button"
                     onClick={deleteSelectedHistory}
@@ -4475,7 +4599,7 @@ export default function OpenApiTestClient({
 
                 <section className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <h4 className="text-xs font-black text-slate-700">전송 전문 수정</h4>
+                    <h4 className="text-xs font-black text-slate-700">전송 전문 수정 및 재테스트</h4>
                     <button
                       type="button"
                       onClick={async () => {
@@ -4493,7 +4617,7 @@ export default function OpenApiTestClient({
                       disabled={isRunning}
                       className="rounded-md bg-[#2c2a26] px-3 py-1.5 text-xs font-black text-white transition hover:bg-[#3b352c] disabled:cursor-not-allowed disabled:opacity-60"
                     >
-                      {isRunning ? "전송 중..." : "수정 전문 전송"}
+                      {isRunning ? "전송 중..." : "수정 전문 재테스트"}
                     </button>
                   </div>
                   <div className="mt-3 grid gap-3 md:grid-cols-2">
@@ -4540,19 +4664,16 @@ export default function OpenApiTestClient({
                   {isBodyMethod(historyReplayMethod) ? (
                     <label className="mt-3 grid gap-1 text-xs font-black text-slate-700">
                       전송 바디 (JSON)
-                      <RequiredJsonBodyEditor
+                      <textarea
                         value={historyReplayBodyText}
-                        onChange={setHistoryReplayBodyText}
+                        onChange={(event) => setHistoryReplayBodyText(event.target.value)}
                         rows={12}
-                        textClassName="text-xs"
+                        className="rounded-md border border-slate-200 bg-white px-3 py-2 font-mono text-xs outline-none"
                       />
                     </label>
                   ) : null}
                 </section>
               </article>
-              <aside className="min-h-0 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-3">
-                <SampleSpecPanel sample={selectedHistorySample} />
-              </aside>
             </div>
           </section>
         </div>

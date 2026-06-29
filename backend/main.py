@@ -1,4 +1,4 @@
-"""KB OpenAPI production test FastAPI backend."""
+"""KB OpenAPI B2B test FastAPI backend."""
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,8 +10,8 @@ from backend.settings import get_runtime_settings
 settings = get_runtime_settings()
 
 app = FastAPI(
-    title="KB OpenAPI Production",
-    description="KB OpenAPI production backend",
+    title="KB OpenAPI B2B Sample",
+    description="KB OpenAPI B2B sample backend",
     version="1.0.0",
     docs_url="/docs" if settings.docs_enabled else None,
     redoc_url="/redoc" if settings.docs_enabled else None,
@@ -38,7 +38,7 @@ async def health_check():
 @app.get("/")
 async def root():
     return {
-        "message": "KB OpenAPI Production API",
+        "message": "KB OpenAPI B2B Sample API",
         "mode": settings.mode,
         "docs": "/docs" if settings.docs_enabled else None,
     }
@@ -48,7 +48,7 @@ if __name__ == "__main__":
     import uvicorn
 
     print("=" * 50)
-    print(" KB OpenAPI Production server starting")
+    print(" KB OpenAPI B2B Sample server starting")
     print("=" * 50)
     print(f" Mode: {settings.mode}")
     print(f" URL: http://localhost:{settings.port}")
@@ -58,5 +58,5 @@ if __name__ == "__main__":
         "backend.main:app",
         host=settings.host,
         port=settings.port,
-        reload=False,
+        reload=settings.is_development,
     )

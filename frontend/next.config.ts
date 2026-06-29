@@ -7,7 +7,7 @@ const apiUrl = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8020")
 
 const nextConfig: NextConfig = {
   devIndicators: false,
-  // OpenAPI production environment: Frontend 3020, Backend 8020 by default.
+  // OpenAPI test environment: Frontend 3020, Backend 8020 by default.
   async rewrites() {
     return [
       {

@@ -1,18 +1,15 @@
 broker: kb
 version: "manual"
-source: "KB OpenAPI production configuration"
+source: "KB증권 공식 구현서 또는 사용자가 제공한 내부 문서"
 base_urls:
-  production: "https://developer.kbsec.com:32484"
+  paper: ""
+  real: ""
 auth:
   token:
-    method: "POST"
-    path: "/oauth2/token"
-    required_headers:
-      - "Content-Type"
-    required_body:
-      - "clientId"
-      - "clientSecret"
-      - "grantType"
+    method: ""
+    path: ""
+    required_headers: []
+    required_body: []
 features:
   quote:
     method: ""

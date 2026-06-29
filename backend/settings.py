@@ -1,4 +1,4 @@
-"""Production-only runtime settings for the KB OpenAPI test backend."""
+"""Runtime settings for the KB OpenAPI B2B test backend."""
 
 from __future__ import annotations
 
@@ -8,12 +8,20 @@ from functools import lru_cache
 from typing import Literal, Mapping
 
 
-RuntimeMode = Literal["production"]
+RuntimeMode = Literal["development", "production"]
 
+DEFAULT_DEV_ALLOWED_HOST_SUFFIXES = (
+    "kbsec.com",
+    "localhost",
+    "127.0.0.1",
+)
 DEFAULT_PROD_ALLOWED_HOST_SUFFIXES = ("kbsec.com",)
+
+DEFAULT_DEVELOPMENT_ENVIRONMENT = {
+    "KB_B2B_BASE_URL": "https://dbaasapi.kbsec.com:32484",
+}
 DEFAULT_PRODUCTION_ENVIRONMENT = {
-    "KB_BASE_URL": "https://developer.kbsec.com:32484",
-    "KB_B2C_TOKEN_BASE_URL": "https://developer.kbsec.com:32484",
+    "KB_B2B_BASE_URL": "https://baasapi.kbsec.com:32484",
 }
 
 
@@ -37,19 +45,20 @@ def _first_env(*keys: str, default: str) -> str:
     return default
 
 
-def normalize_runtime_mode(value: str | None = None) -> RuntimeMode:
-    return "production"
+def normalize_runtime_mode(value: str | None) -> RuntimeMode:
+    normalized = _clean(value).lower()
+    if normalized in {"prod", "production", "real", "live", "operate", "operation"}:
+        return "production"
+    return "development"
 
 
 @dataclass(frozen=True)
 class OpenApiEnvironmentSettings:
-    kb_base_url: str
-    kb_b2c_token_base_url: str
+    kb_b2b_base_url: str
 
     def as_public_dict(self) -> dict[str, str]:
         return {
-            "kbBaseUrl": self.kb_base_url,
-            "kbB2cTokenBaseUrl": self.kb_b2c_token_base_url,
+            "kbB2bBaseUrl": self.kb_b2b_base_url,
         }
 
 
@@ -66,44 +75,62 @@ class RuntimeSettings:
     environments: Mapping[RuntimeMode, OpenApiEnvironmentSettings]
 
     @property
-    def kb_config_mode(self) -> Literal["prod"]:
-        return "prod"
+    def is_development(self) -> bool:
+        return self.mode == "development"
+
+    @property
+    def kb_config_mode(self) -> Literal["dev", "prod"]:
+        return "prod" if self.mode == "production" else "dev"
 
     @property
     def active_environment(self) -> OpenApiEnvironmentSettings:
-        return self.environments["production"]
+        return self.environments[self.mode]
 
 
-def _environment_settings() -> OpenApiEnvironmentSettings:
-    defaults = DEFAULT_PRODUCTION_ENVIRONMENT
+def _environment_settings(mode: RuntimeMode) -> OpenApiEnvironmentSettings:
+    if mode == "production":
+        prefixes = ("AIS_OPENAPI_PRODUCTION", "AIS_OPENAPI_PROD")
+        defaults = DEFAULT_PRODUCTION_ENVIRONMENT
+    else:
+        prefixes = ("AIS_OPENAPI_DEVELOPMENT", "AIS_OPENAPI_DEV")
+        defaults = DEFAULT_DEVELOPMENT_ENVIRONMENT
+
     return OpenApiEnvironmentSettings(
-        kb_base_url=_first_env(
-            "AIS_OPENAPI_KB_BASE_URL",
-            "AIS_OPENAPI_PROD_KB_BASE_URL",
-            "AIS_OPENAPI_PRODUCTION_KB_BASE_URL",
-            default=defaults["KB_BASE_URL"],
-        ),
-        kb_b2c_token_base_url=_first_env(
-            "AIS_OPENAPI_KB_B2C_TOKEN_BASE_URL",
-            "AIS_OPENAPI_PROD_KB_B2C_TOKEN_BASE_URL",
-            "AIS_OPENAPI_PRODUCTION_KB_B2C_TOKEN_BASE_URL",
-            default=defaults["KB_B2C_TOKEN_BASE_URL"],
+        kb_b2b_base_url=_first_env(
+            *(f"{prefix}_KB_B2B_BASE_URL" for prefix in prefixes),
+            default=defaults["KB_B2B_BASE_URL"],
         ),
     )
 
 
 @lru_cache(maxsize=1)
 def get_runtime_settings() -> RuntimeSettings:
-    mode = normalize_runtime_mode()
+    mode = normalize_runtime_mode(
+        os.getenv("AIS_OPENAPI_MODE")
+        or os.getenv("APP_ENV")
+        or os.getenv("ENV")
+        or os.getenv("NODE_ENV")
+    )
+
     port = int(_clean(os.getenv("AIS_OPENAPI_BACKEND_PORT")) or "8020")
     cors_origins = _split_csv(os.getenv("AIS_OPENAPI_CORS_ORIGINS"))
     allowed_host_suffixes = _split_csv(os.getenv("AIS_OPENAPI_ALLOWED_HOST_SUFFIXES"))
+
+    if not cors_origins and mode == "development":
+        cors_origins = ("*",)
     if not allowed_host_suffixes:
-        allowed_host_suffixes = DEFAULT_PROD_ALLOWED_HOST_SUFFIXES
+        allowed_host_suffixes = (
+            DEFAULT_DEV_ALLOWED_HOST_SUFFIXES
+            if mode == "development"
+            else DEFAULT_PROD_ALLOWED_HOST_SUFFIXES
+        )
 
     environments: Mapping[RuntimeMode, OpenApiEnvironmentSettings] = {
-        "production": _environment_settings(),
+        "development": _environment_settings("development"),
+        "production": _environment_settings("production"),
     }
+
+    expose_local_defaults = mode == "development" or _truthy(os.getenv("AIS_OPENAPI_EXPOSE_LOCAL_DEFAULTS"))
 
     return RuntimeSettings(
         mode=mode,
@@ -111,8 +138,8 @@ def get_runtime_settings() -> RuntimeSettings:
         port=port,
         cors_origins=cors_origins,
         allowed_host_suffixes=allowed_host_suffixes,
-        allow_http_targets=_truthy(os.getenv("AIS_OPENAPI_ALLOW_HTTP_TARGETS")),
-        expose_local_defaults=_truthy(os.getenv("AIS_OPENAPI_EXPOSE_LOCAL_DEFAULTS")),
-        docs_enabled=_truthy(os.getenv("AIS_OPENAPI_ENABLE_DOCS")),
+        allow_http_targets=mode == "development" or _truthy(os.getenv("AIS_OPENAPI_ALLOW_HTTP_TARGETS")),
+        expose_local_defaults=expose_local_defaults,
+        docs_enabled=mode == "development" or _truthy(os.getenv("AIS_OPENAPI_ENABLE_DOCS")),
         environments=environments,
     )

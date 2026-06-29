@@ -3,21 +3,17 @@
 import { useEffect, useMemo, useState } from "react";
 import kbCatalog from "./samples.generated.json";
 import OpenApiTestClient, {
-  type OpenApiFieldSpec,
   type OpenApiSample,
   type OpenApiTokenProcedure,
 } from "@/components/openapi/OpenApiTestClient";
 
 const FALLBACK_BASE_URL =
   process.env.NEXT_PUBLIC_OPENAPI_TEST_API_URL || process.env.NEXT_PUBLIC_API_URL || "http://localhost:8020";
-const RUNTIME_MODE = "production";
-const DEFAULT_ENVIRONMENT: Required<RuntimeEnvironmentConfig> = {
-  kbBaseUrl: process.env.NEXT_PUBLIC_OPENAPI_PROD_KB_B2C_BASE_URL || "https://developer.kbsec.com:32484",
-  kbB2cTokenBaseUrl: process.env.NEXT_PUBLIC_OPENAPI_PROD_KB_B2C_TOKEN_BASE_URL || "https://developer.kbsec.com:32484",
-};
+
+const BUILD_RUNTIME_MODE = normalizeRuntimeMode(process.env.NEXT_PUBLIC_OPENAPI_MODE);
 
 type ApiMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
-type RuntimeMode = "production";
+type RuntimeMode = "development" | "production";
 
 type CatalogSample = {
   id: string;
@@ -26,22 +22,18 @@ type CatalogSample = {
   endpoint?: string;
   path?: string;
   transactionCode?: string;
-  businessCategory?: OpenApiSample["businessCategory"];
   description: string;
   headers?: Record<string, string>;
   query?: Record<string, unknown>;
   body?: Record<string, unknown>;
-  inputSpec?: OpenApiFieldSpec[];
-  outputSpec?: OpenApiFieldSpec[];
 };
 
 type KbCatalog = {
-  b2c?: CatalogSample[];
+  b2b?: CatalogSample[];
 };
 
 type RuntimeEnvironmentConfig = {
-  kbBaseUrl?: string;
-  kbB2cTokenBaseUrl?: string;
+  kbB2bBaseUrl?: string;
 };
 
 type RuntimeConfig = {
@@ -50,21 +42,38 @@ type RuntimeConfig = {
   environments?: Partial<Record<RuntimeMode, RuntimeEnvironmentConfig>>;
 };
 
-function environmentForConfig(config: RuntimeConfig | null): Required<RuntimeEnvironmentConfig> {
-  const active = config?.environment ?? {};
-  const production = config?.environments?.production ?? {};
+const DEFAULT_ENVIRONMENTS: Record<RuntimeMode, Required<RuntimeEnvironmentConfig>> = {
+  development: {
+    kbB2bBaseUrl: process.env.NEXT_PUBLIC_OPENAPI_DEV_KB_B2B_BASE_URL || "https://dbaasapi.kbsec.com:32484",
+  },
+  production: {
+    kbB2bBaseUrl: process.env.NEXT_PUBLIC_OPENAPI_PROD_KB_B2B_BASE_URL || "https://baasapi.kbsec.com:32484",
+  },
+};
+
+function normalizeRuntimeMode(raw: string | undefined | null): RuntimeMode {
+  const normalized = (raw || "").trim().toLowerCase();
+  return ["prod", "production", "real", "live"].includes(normalized) ? "production" : "development";
+}
+
+function environmentForMode(config: RuntimeConfig | null, mode: RuntimeMode): Required<RuntimeEnvironmentConfig> {
+  const defaults = DEFAULT_ENVIRONMENTS[mode];
+  const fromMode = config?.environments?.[mode] ?? {};
+  const active = normalizeRuntimeMode(config?.mode) === mode ? config?.environment ?? {} : {};
   return {
-    kbBaseUrl: active.kbBaseUrl || production.kbBaseUrl || DEFAULT_ENVIRONMENT.kbBaseUrl || FALLBACK_BASE_URL,
-    kbB2cTokenBaseUrl:
-      active.kbB2cTokenBaseUrl ||
-      production.kbB2cTokenBaseUrl ||
-      DEFAULT_ENVIRONMENT.kbB2cTokenBaseUrl ||
-      FALLBACK_BASE_URL,
+    kbB2bBaseUrl: active.kbB2bBaseUrl || fromMode.kbB2bBaseUrl || defaults.kbB2bBaseUrl || FALLBACK_BASE_URL,
   };
 }
 
 function toKbServicePath(entry: CatalogSample) {
-  return entry.path || entry.endpoint || "";
+  if (entry.path) return entry.path;
+  if (entry.endpoint?.startsWith("/baas/")) return entry.endpoint;
+
+  const transactionCode = (entry.transactionCode || entry.id)
+    .replace(/^Tkb_/i, "")
+    .replace(/_B2B(?:__\d+)?$/i, "")
+    .toLowerCase();
+  return `/baas/v2/${transactionCode}`;
 }
 
 function toOpenApiSample(entry: CatalogSample, baseUrl: string): OpenApiSample {
@@ -73,11 +82,9 @@ function toOpenApiSample(entry: CatalogSample, baseUrl: string): OpenApiSample {
     label: entry.label.replace(/\.xml$/i, ""),
     method: entry.method,
     path: toKbServicePath(entry),
-    description: entry.description.replace(/^B2C\s+/i, ""),
-    businessCategory: entry.businessCategory,
+    description: entry.description,
     headers: {
       "Content-Type": "application/json",
-      appKey: "{{clientId}}",
       Authorization: "bearer {{access_token}}",
       ...(entry.headers ?? {}),
     },
@@ -85,20 +92,21 @@ function toOpenApiSample(entry: CatalogSample, baseUrl: string): OpenApiSample {
     body: entry.body,
     baseUrl,
     source: "trx-rule",
-    inputSpec: entry.inputSpec,
-    outputSpec: entry.outputSpec,
   };
 }
 
-function tokenProcedure(tokenBaseUrl: string): OpenApiTokenProcedure {
+function tokenProcedureForMode(mode: RuntimeMode, baseUrl: string): OpenApiTokenProcedure {
   return {
-    id: "kb-b2c-token",
-    label: "KB OAuth2 토큰 발급",
-    mode: "B2C",
-    environment: tokenBaseUrl,
+    id: "kb-b2b-token",
+    label: "KB B2B 토큰 발급",
+    mode: "B2B",
+    environment: baseUrl || DEFAULT_ENVIRONMENTS[mode].kbB2bBaseUrl,
     steps: [
-      `1) POST ${tokenBaseUrl}/oauth2/token 으로 access_token을 발급합니다.`,
-      "2) 발급된 access_token을 API 요청의 Authorization 헤더에 사용합니다.",
+      `1) POST ${baseUrl}/baas/v2/clause_agree_process 로 이용약관 동의를 등록합니다.`,
+      `2) POST ${baseUrl}/baas/v2/email_agree_process 로 금융거래 동의를 등록합니다.`,
+      `3) POST ${baseUrl}/baas/v2/baas_auth_issue 로 code와 issueNo를 발급합니다.`,
+      `4) POST ${baseUrl}/baas/v2/baas_token_issue 에 code, issueNo, clientId/clientSecret, grantType=authorization_code, scope=public security를 전달합니다.`,
+      "5) 응답의 access_token을 샘플 API 요청 Authorization 헤더에 사용합니다.",
     ],
     recommendedHeaders: [
       "Authorization: bearer <access_token>",
@@ -109,6 +117,15 @@ function tokenProcedure(tokenBaseUrl: string): OpenApiTokenProcedure {
 
 export default function OpenApiTestPage() {
   const [runtimeConfig, setRuntimeConfig] = useState<RuntimeConfig | null>(null);
+  const [runtimeMode, setRuntimeMode] = useState<RuntimeMode>(() => {
+    if (typeof window === "undefined" || BUILD_RUNTIME_MODE === "production") return BUILD_RUNTIME_MODE;
+    try {
+      const cached = window.localStorage.getItem("kb.openapi.b2b.runtimeMode");
+      return cached ? normalizeRuntimeMode(cached) : BUILD_RUNTIME_MODE;
+    } catch {
+      return BUILD_RUNTIME_MODE;
+    }
+  });
 
   useEffect(() => {
     let isCancelled = false;
@@ -128,15 +145,27 @@ export default function OpenApiTestPage() {
     };
   }, []);
 
-  const activeEnvironment = useMemo(() => environmentForConfig(runtimeConfig), [runtimeConfig]);
-  const defaultBaseUrl = activeEnvironment.kbBaseUrl || FALLBACK_BASE_URL;
+  function selectRuntimeMode(mode: RuntimeMode) {
+    setRuntimeMode(mode);
+    try {
+      window.localStorage.setItem("kb.openapi.b2b.runtimeMode", mode);
+    } catch {
+      // Runtime mode persistence is optional.
+    }
+  }
+
+  const activeEnvironment = useMemo(
+    () => environmentForMode(runtimeConfig, runtimeMode),
+    [runtimeConfig, runtimeMode],
+  );
+  const defaultBaseUrl = activeEnvironment.kbB2bBaseUrl || FALLBACK_BASE_URL;
   const samples = useMemo(
-    () => ((kbCatalog as KbCatalog).b2c ?? []).map((entry) => toOpenApiSample(entry, defaultBaseUrl)),
+    () => ((kbCatalog as KbCatalog).b2b ?? []).map((entry) => toOpenApiSample(entry, defaultBaseUrl)),
     [defaultBaseUrl],
   );
   const tokenProcedures = useMemo(
-    () => [tokenProcedure(activeEnvironment.kbB2cTokenBaseUrl)],
-    [activeEnvironment.kbB2cTokenBaseUrl],
+    () => [tokenProcedureForMode(runtimeMode, defaultBaseUrl)],
+    [defaultBaseUrl, runtimeMode],
   );
 
   return (
@@ -149,22 +178,41 @@ export default function OpenApiTestPage() {
             </div>
             <div className="min-w-0">
               <p className="text-sm font-black text-[#8a6400]">KB OpenAPI</p>
-              <h1 className="text-2xl font-black tracking-normal text-[#2c2a26]">KB OpenAPI</h1>
-              <p className="mt-1 text-sm font-semibold text-slate-500">KB증권 OpenAPI 연동 확인</p>
+              <h1 className="text-2xl font-black tracking-normal text-[#2c2a26]">KB B2B OpenAPI 테스트</h1>
+              <p className="mt-1 text-sm font-semibold text-slate-500">KB증권 B2B API 연동 테스트</p>
             </div>
           </div>
           <div className="flex flex-wrap gap-2 text-xs font-black">
-            <span className="rounded-full bg-[#fff4cc] px-3 py-1 text-[#7a5500]">{samples.length}건</span>
-            <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-600">production</span>
+            <span className="rounded-full bg-[#fff4cc] px-3 py-1 text-[#7a5500]">B2B {samples.length}건</span>
+            <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-600">{runtimeMode}</span>
           </div>
         </div>
       }
-      runtimeMode={RUNTIME_MODE}
+      modeSelectorContent={
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-[#e3d8bd] bg-[#fffaf0] px-3 py-2">
+          <span className="text-xs font-black text-[#6b5b3f]">환경</span>
+          {(["development", "production"] as RuntimeMode[]).map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              onClick={() => selectRuntimeMode(mode)}
+              className={`rounded-md border px-3 py-1.5 text-xs font-black transition ${
+                runtimeMode === mode
+                  ? "border-[#2c2a26] bg-[#2c2a26] text-white"
+                  : "border-[#d7cfbf] bg-white text-[#2c2a26] hover:bg-[#fff4cc]"
+              }`}
+            >
+              {mode === "production" ? "운영" : "개발"}
+            </button>
+          ))}
+        </div>
+      }
+      runtimeMode={runtimeMode}
       samples={samples}
-      historyStorageKey="kb.openapi.b2c.production.history"
+      historyStorageKey="kb.openapi.b2b.sample.history"
       defaultBaseUrl={defaultBaseUrl}
       broker="Tkb"
-      credentialStorageKey="kb.openapi.b2c.production.credentials"
+      credentialStorageKey="kb.openapi.b2b.sample.credentials"
       tokenProcedures={tokenProcedures}
     />
   );

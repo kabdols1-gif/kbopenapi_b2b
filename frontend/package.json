@@ -1,5 +1,5 @@
 {
-  "name": "kb-openapi-b2c-production-frontend",
+  "name": "kb-openapi-b2b-sample-frontend",
   "version": "0.1.0",
   "private": true,
   "scripts": {
